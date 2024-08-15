@@ -8,6 +8,7 @@ import requests
 import certifi
 import os
 import json
+from groq import Groq
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24).hex()
@@ -16,9 +17,76 @@ cors = CORS(app, origins='*')
 
 # MongoDB connection
 client = MongoClient('mongodb+srv://artsyoli11:Uh28xxh8yP6O4H6l@rideclaremontcluster.mwq7krb.mongodb.net/?retryWrites=true&w=majority&appName=rideClaremontCluster&ssl=true&tlsAllowInvalidCertificates=true')
-db = client['rideclaremont']  # Replace 'mydatabase' with your database name
+db = client['rideclaremont']  
 users_collection = db['users']
 entries_collection = db['entries']
+
+groqClient = Groq(
+    api_key=os.environ.get("GROQ_API_KEY"),
+)
+
+conversation_history = []
+
+# # Load Whisper ASR model
+# asr_model = client.load_model("whisper-large-v3")
+
+# # Load LLaMA 3.1 NLP model
+# nlp_model = client.load_model("llama3-groq-70b-8192-tool-use-preview")
+
+
+
+@app.route('/voice-assistant', methods=['POST'])
+def voice_assistant():
+    audio_file = request.files['audio']
+    audio_data = audio_file.read()
+    
+    try:
+        # Step 1: Transcribe the audio using the Whisper model
+        translation = groqClient.audio.translations.create(
+            file=(audio_file.filename, audio_data),
+            model="whisper-large-v3",
+            prompt="Specify context or spelling",  # Optional, customize as needed
+            response_format="json",  # Optional
+            temperature=0.0  # Optional
+        )
+        
+        user_text = translation.text
+        print("User Transcription:", user_text)
+
+        conversation_history.append({"role": "user", "content": user_text})
+        
+        # Step 2: Generate a response using the LLaMA model
+        chat_completion = groqClient.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": user_text,
+                }
+            ],
+            model="llama3-8b-8192",  # You can choose a different LLaMA model as needed
+        )
+        
+        response_text = chat_completion.choices[0].message.content
+        print("Generated Response:", response_text)
+        
+        conversation_history.append({"role": "assistant", "content": response_text})
+
+        # Return the transcribed text and generated response
+        #return jsonify({
+            #"transcription": text,
+            #"response": response_text
+        #})
+        return jsonify({"conversation_history": conversation_history})
+    
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({"error": str(e)}), 500
+    
+@app.route('/clear-history', methods=['POST'])
+def clear_history():
+    global conversation_history
+    conversation_history = []  # Clear the history
+    return jsonify({"message": "Conversation history cleared."})
 
 # Routes
 @app.route('/getRequests', methods=['GET'])
